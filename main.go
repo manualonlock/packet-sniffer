@@ -2,29 +2,29 @@ package main
 
 import (
 	"flag"
-	"fmt"
 	"log"
 	"packet_sniffer/capture"
-	units "packet_sniffer/model"
 	"packet_sniffer/parsing"
 	"packet_sniffer/render"
-	"packet_sniffer/services"
+	"packet_sniffer/utils"
 	"time"
 )
 
 func terminal() {
-	renderer := render.TerminalRenderer{}
-	renderer.Init()
-	parser := services.Parser{
-		EthernetParser: &parsing.EthernetParser{},
-		IPv4Parser:     &parsing.IPV4Parser{},
-	}
+	parser := parsing.CompositeParser{}
 	capturer := capture.UnixCapturer{}
-	if err := capturer.Init("wlp0s20f3"); err != nil {
-		log.Fatal(err)
-	}
 
+	networkInterface := make(chan string)
+
+	renderer := render.Terminal{NetworkInterface: networkInterface}
+
+	ifaces := utils.GetNetworkInterfaces()
 	go func() {
+		iface := <-networkInterface
+
+		if err := capturer.Init(iface); err != nil {
+			log.Fatal(err)
+		}
 		for {
 			raw, err := capturer.Capture()
 			if err != nil {
@@ -41,44 +41,47 @@ func terminal() {
 		}
 
 	}()
+	renderer.Start(ifaces)
 
-	renderer.Run()
 }
 
 func stdout() {
-	parser := services.Parser{
-		EthernetParser: &parsing.EthernetParser{},
-		IPv4Parser:     &parsing.IPV4Parser{},
-	}
-	capturer := capture.UnixCapturer{}
-	if err := capturer.Init("wlp0s20f3"); err != nil {
-		log.Fatal(err)
-	}
-	for {
-		var input string
-		fmt.Println("Press enter so capture next PDU...")
-		fmt.Scanln(&input)
-		raw, err := capturer.Capture()
-		if err != nil {
-			log.Fatal(err)
-			return
-		}
-		currentPDU, err := parser.Parse(raw)
+	//parser := parsing.CompositeParser{}
+	//capturer := capture.UnixCapturer{}
+	//if err := capturer.Init("wlp0s20f3"); err != nil {
+	//	log.Fatal(err)
+	//}
+	//for {
+	//	var input string
+	//	fmt.Println("Press enter so capture next PDU...")
+	//	fmt.Scanln(&input)
+	//	raw, err := capturer.Capture()
+	//	if err != nil {
+	//		log.Fatal(err)
+	//		return
+	//	}
+	//	pdu, _ := parser.Parse(raw)
+	//	if pdu.NextPDU != nil && pdu.NextPDU.Protocol == units.IPv4 {
+	//		parsing.IPV4Parser{}.PDUBreakdown(pdu.NextPDU)
+	//
+	//	}
+	//	fmt.Println(pdu)
+	//currentPDU, err := parser.Parse(raw)
 
-		for currentPDU != nil {
-			protocolHMR := units.ProtocolStringMap[currentPDU.Protocol]
-			fmt.Printf("PDU: %s\n", protocolHMR)
-			for h, v := range currentPDU.Headers {
-				fmt.Printf("%s: %s\n", h, v.HumanReadableValue)
-			}
-			currentPDU = currentPDU.NextPDU
-			fmt.Println()
-		}
-		if err != nil {
-			log.Fatal(err)
-			return
-		}
-	}
+	//for currentPDU != nil {
+	//	protocolHMR := units.ProtocolStringMap[currentPDU.Protocol]
+	//	fmt.Printf("PDU: %s\n", protocolHMR)
+	//	for h, v := range currentPDU.Headers {
+	//		fmt.Printf("%s: %s\n", h, v.HumanReadableValue)
+	//	}
+	//	currentPDU = currentPDU.NextPDU
+	//	fmt.Println()
+	//}
+	//	if err != nil {
+	//		log.Fatal(err)
+	//		return
+	//	}
+	//}
 }
 
 func main() {

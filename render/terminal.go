@@ -1,106 +1,86 @@
 package render
 
 import (
-	"errors"
 	"fmt"
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
-	"log"
 	units "packet_sniffer/model"
+	"packet_sniffer/parsing"
 	"strconv"
+	"strings"
 	"time"
 )
 
-var columns = []string{"#", "Time:", "Source:", "Destination:", "Protocol:", "Size:"}
+var packetListColumns = []string{"#", "Time:", "Source:", "Destination:", "Protocol:", "Size:"}
 
-func Table() *tview.Table {
-	table := tview.NewTable()
-	table.SetFixed(1, 1)
-	table.SetBorders(false).SetBorder(true).SetBorderColor(tcell.ColorLightSeaGreen)
-	table.SetTitle("Network interface: wlp0s20f3").SetTitleColor(tcell.ColorLightSeaGreen)
-	table.SetSelectable(true, false)
-	return table
+type PacketListPane struct {
+	Application *tview.Application
+	table       *tview.Table
+	rowToPDU    *map[int]*units.PDU
+	PDUHandover func(pdu *units.PDU)
 }
 
-func PDUDetailedViewBox() *tview.Table {
-	table := tview.NewTable()
-	table.SetSelectable(true, false)
-	table.SetBorderColor(tcell.ColorMediumPurple)
-	table.SetBorder(true)
-	return table
+func (p *PacketListPane) Primitive() *tview.Table {
+	return p.table
 }
 
-func PDUBreakDownBox() *tview.Table {
-	table := tview.NewTable()
-	table.SetSelectable(false, false)
-	table.SetBorderColor(tcell.ColorLightYellow)
-	table.SetBorder(true)
-	return table
+func (p *PacketListPane) Init(iface string) {
+	rowToPDU := make(map[int]*units.PDU, 1000)
+	p.rowToPDU = &rowToPDU
+
+	p.table = tview.NewTable()
+	p.table.SetFixed(1, 1)
+	p.table.SetBorders(false).SetBorder(true).SetBorderColor(tcell.ColorLightSeaGreen)
+	p.table.SetTitle(fmt.Sprintf("Network interface: %s", iface)).SetTitleColor(tcell.ColorLightSeaGreen)
+	p.table.SetSelectable(true, false)
+
+	p.table.SetSelectionChangedFunc(func(row, column int) {
+		pdu := rowToPDU[row]
+		p.PDUHandover(pdu)
+	})
+
+	go p.Application.QueueUpdateDraw(func() { p.AddRow(packetListColumns...) })
+
 }
 
-type TerminalRenderer struct {
-	app                *tview.Application
-	table              *tview.Table
-	PDUBreakDownBox    *tview.Table
-	pduDetailedViewBox *tview.Table
+func (p *PacketListPane) AddPDU(pdu *units.PDU) {
+	var source string
+	var dest string
+	var protocol string
+	var length string
 
-	pduCache             *map[int]*units.PDU
-	pduDetailedViewCache *map[int]*units.PDU
-}
+	currentPDU := pdu
+	for currentPDU != nil {
+		if currentPDU.NextPDU == nil {
+			protocol = units.ProtocolStringMap[currentPDU.Protocol].Shortened
+			length = strconv.FormatInt(int64(len(currentPDU.Payload)), 10)
+		}
+		parser := parsing.ParserFromProtocol(currentPDU.Protocol)
 
-func (tr *TerminalRenderer) addEtherPDU(pdu *units.PDU) error {
-	destMac, _ := pdu.Headers["destMac"]
-	srcMac, _ := pdu.Headers["srcMac"]
-
-	values := []string{
-		strconv.FormatInt(int64(tr.table.GetRowCount()), 10),
-		time.Now().Format("2006-01-02 15:04:05"),
-		destMac.HumanReadableValue,
-		srcMac.HumanReadableValue,
-		"Ethernet",
-		strconv.FormatInt(int64(len(pdu.Payload)), 10),
+		srcHeader, hit := currentPDU.Headers[parsing.SRCHeader]
+		if hit == true {
+			source = parser.HeaderToHumanReadable(parsing.SRCHeader, srcHeader)
+		}
+		dstHeader, hit := currentPDU.Headers[parsing.DSTHeader]
+		if hit == true {
+			dest = parser.HeaderToHumanReadable(parsing.DSTHeader, dstHeader)
+		}
+		currentPDU = currentPDU.NextPDU
 	}
-	go tr.app.QueueUpdateDraw(func() { tr.addRow(values) })
-	return nil
+	go p.Application.QueueUpdateDraw(func() { p.AddRow(source, dest, protocol, length) })
+	rowToPDU := *p.rowToPDU
+	rowToPDU[p.table.GetRowCount()] = pdu
 }
 
-func (tr *TerminalRenderer) addIPv4PDU(pdu *units.PDU) error {
-	destIP, _ := pdu.Headers["sourceIP"]
-	srcIP, _ := pdu.Headers["destIP"]
+func (p *PacketListPane) AddRow(initialValues ...string) error {
+	rowCount := p.table.GetRowCount()
+	var values []string
+	if rowCount == 0 {
+		values = initialValues
+	} else {
+		values = append([]string{strconv.FormatInt(int64(p.table.GetRowCount()), 10), time.Now().Format("2006-01-02 15:04:05")}, initialValues...)
+	}
 
-	values := []string{
-		strconv.FormatInt(int64(tr.table.GetRowCount()), 10),
-		time.Now().Format("2006-01-02 15:04:05"),
-		destIP.HumanReadableValue,
-		srcIP.HumanReadableValue,
-		units.ProtocolStringMap[pdu.Protocol],
-		strconv.FormatInt(int64(len(pdu.Payload)), 10),
-	}
-	go tr.app.QueueUpdateDraw(func() { tr.addRow(values) })
-	return nil
-}
-func (tr *TerminalRenderer) AddPDU(pdu *units.PDU) error {
-	pduCache := *tr.pduCache
-	outerPDU := pdu
-
-	for outerPDU.NextPDU != nil {
-		outerPDU = outerPDU.NextPDU
-	}
-	pduCache[tr.table.GetRowCount()+1] = pdu
-	switch outerPDU.Protocol {
-	case units.ETHERNET:
-		return tr.addEtherPDU(outerPDU)
-	case units.IPv4:
-		return tr.addIPv4PDU(outerPDU)
-	}
-	return nil
-}
-
-func (tr *TerminalRenderer) addRow(values []string) error {
-	if len(values) != len(columns) {
-		return errors.New("columns and values are not of equal length")
-	}
-	rowCount := tr.table.GetRowCount()
 	for i, v := range values {
 		var color tcell.Color
 		if rowCount == 0 {
@@ -121,89 +101,168 @@ func (tr *TerminalRenderer) addRow(values []string) error {
 			cell.SetExpansion(1)
 		}
 		cell.SetTextColor(color)
-		tr.table.SetCell(rowCount, i, cell)
+		p.table.SetCell(rowCount, i, cell)
 	}
 	return nil
 }
 
-func (tr *TerminalRenderer) DetailedViewDisplayPDU(pdu *units.PDU) {
-	outerPDU := pdu
-	rowCount := 0
-	tr.pduDetailedViewBox.Clear()
-	pduDetailedViewCache := *tr.pduDetailedViewCache
-	for h := range pduDetailedViewCache {
-		delete(pduDetailedViewCache, h)
-	}
-	for outerPDU != nil {
-		var cell *tview.TableCell
-		switch outerPDU.Protocol {
-		case units.ETHERNET:
-			cell = tview.NewTableCell(fmt.Sprintf("Ethernet, Src: %s, Dst: %s", outerPDU.Headers["srcMac"].HumanReadableValue, outerPDU.Headers["destMac"].HumanReadableValue))
-		case units.IPv4:
-			cell = tview.NewTableCell(fmt.Sprintf("Internet Protocol V4, Src: %s, Dst: %s", outerPDU.Headers["sourceIP"].HumanReadableValue, outerPDU.Headers["destIP"].HumanReadableValue))
+type PacketDetailsPane struct {
+	Application *tview.Application
+	table       *tview.Table
+	rowToPDU    *map[int]*units.PDU
+	PDUHandover func(pdu *units.PDU)
+}
+
+func (p *PacketDetailsPane) Primitive() *tview.Table {
+	return p.table
+}
+
+func (p *PacketDetailsPane) Init() {
+	rowToPDU := make(map[int]*units.PDU, 10)
+	p.rowToPDU = &rowToPDU
+
+	p.table = tview.NewTable()
+	p.table.SetSelectable(true, false)
+	p.table.SetBorderColor(tcell.ColorMediumPurple)
+	p.table.SetBorder(true)
+
+	p.table.SetSelectionChangedFunc(func(row, column int) {
+		pdu := rowToPDU[row]
+		p.PDUHandover(pdu)
+	})
+
+}
+
+func (p *PacketDetailsPane) AddPDU(pdu *units.PDU) {
+	p.table.Clear()
+	currentPDU := pdu
+	for currentPDU != nil {
+		rowToPDU := *p.rowToPDU
+		rowToPDU[p.table.GetRowCount()] = currentPDU
+
+		parser := parsing.ParserFromProtocol(currentPDU.Protocol)
+
+		msh := parser.MostSignificantHeaders()
+		values := make([]string, len(msh)+1)
+		values[0] = units.ProtocolStringMap[currentPDU.Protocol].Full
+
+		for i := 0; i < len(msh); i++ {
+			hhr := parser.HeaderToHumanReadable(msh[i], currentPDU.Headers[msh[i]])
+			values[i+1] = fmt.Sprintf("%s: %s", parser.HeaderName(msh[i]), hhr)
 		}
-
-		pduDetailedViewCache[rowCount] = outerPDU
-		cell.SetExpansion(1)
-		tr.pduDetailedViewBox.SetCell(rowCount, 0, cell)
-		outerPDU = outerPDU.NextPDU
-		rowCount++
+		p.AddRow(strings.Join(values, ", "))
+		currentPDU = currentPDU.NextPDU
 	}
 }
 
-func (tr *TerminalRenderer) BreakDownTableDisplayPDU(row, column int) {
-	if row > tr.PDUBreakDownBox.GetRowCount() {
-		return
-	}
-	pduDetailedViewCache := *tr.pduDetailedViewCache
-	tr.PDUBreakDownBox.Clear()
-	pdu := pduDetailedViewCache[row]
+func (p *PacketDetailsPane) AddRow(value string) {
+	cell := tview.NewTableCell(value)
+	cell.SetExpansion(1)
+	p.table.SetCell(p.table.GetRowCount(), 0, cell)
+}
 
-	switch pdu.Protocol {
-	case units.ETHERNET:
-		tr.PDUBreakDownBox.SetCell(0, 0, tview.NewTableCell("Destination:"))
-		tr.PDUBreakDownBox.SetCell(0, 1, tview.NewTableCell(pdu.Headers["destMac"].HumanReadableValue))
-		tr.PDUBreakDownBox.SetCell(1, 0, tview.NewTableCell("Source:"))
-		tr.PDUBreakDownBox.SetCell(1, 1, tview.NewTableCell(pdu.Headers["srcMac"].HumanReadableValue))
-	case units.IPv4:
-		tr.PDUBreakDownBox.SetCell(0, 0, tview.NewTableCell("Version:"))
-		tr.PDUBreakDownBox.SetCell(0, 1, tview.NewTableCell(pdu.Headers["version"].HumanReadableValue))
-		tr.PDUBreakDownBox.SetCell(1, 0, tview.NewTableCell("IHL:"))
-		tr.PDUBreakDownBox.SetCell(1, 1, tview.NewTableCell(pdu.Headers["headerLength"].HumanReadableValue))
+type BreakDownPane struct {
+	Application *tview.Application
+	table       *tview.Table
+	rowToPDU    *map[int]*units.PDU
+}
+
+func (p *BreakDownPane) Primitive() *tview.Table {
+	return p.table
+}
+
+func (p *BreakDownPane) addPDUBreakdownOutput(output parsing.PDUBreakdownOutput, inner bool) {
+	var extra string = ""
+	if inner == true {
+		extra = "  -  "
+	}
+	if output.Description == nil {
+		p.AddRow(fmt.Sprintf("%s%s: %s", extra, output.KeyName, output.Value))
+	} else {
+		p.AddRow(fmt.Sprintf("%s%s: %s (%s)", extra, output.KeyName, output.Value, *output.Description))
 	}
 }
 
-func (tr *TerminalRenderer) tableSelectionChange(row, column int) {
-	pduCache := *tr.pduCache
-	tr.DetailedViewDisplayPDU(pduCache[row])
+func (p *BreakDownPane) AddPDU(pdu *units.PDU) {
+	p.table.Clear()
+	parser := parsing.ParserFromProtocol(pdu.Protocol)
+	for _, output := range parser.PDUBreakdown(pdu) {
+		p.addPDUBreakdownOutput(output, false)
+		for _, o := range output.InnerBreakdowns {
+			p.addPDUBreakdownOutput(o, true)
+		}
+	}
 }
 
-func (tr *TerminalRenderer) Init() {
-	tr.app = tview.NewApplication()
-	tr.app.EnableMouse(true)
-	tr.table = Table()
-	tr.table.SetSelectionChangedFunc(tr.tableSelectionChange)
-	pduCache := make(map[int]*units.PDU, 10)
-	tr.pduCache = &pduCache
+func (p *BreakDownPane) AddRow(value string) {
+	cell := tview.NewTableCell(value)
+	cell.SetExpansion(1)
+	p.table.SetCell(p.table.GetRowCount(), 0, cell)
+}
 
-	tr.pduDetailedViewBox = PDUDetailedViewBox()
-	pduDetailedViewCache := make(map[int]*units.PDU, 10)
-	tr.pduDetailedViewCache = &pduDetailedViewCache
-	tr.pduDetailedViewBox.SetSelectionChangedFunc(tr.BreakDownTableDisplayPDU)
-	tr.PDUBreakDownBox = PDUBreakDownBox()
+func (p *BreakDownPane) Init() {
+	rowToPDU := make(map[int]*units.PDU, 10)
+	p.rowToPDU = &rowToPDU
+
+	p.table = tview.NewTable()
+	p.table.SetSelectable(false, false)
+	p.table.SetBorderColor(tcell.ColorLightYellow)
+	p.table.SetBorder(true)
+}
+
+type Terminal struct {
+	NetworkInterface  chan string
+	app               *tview.Application
+	packetListPane    *PacketListPane
+	packetDetailsPane *PacketDetailsPane
+	breakDownPane     *BreakDownPane
+}
+
+func (t *Terminal) InitPanes(iface string) {
+	breakDownPane := BreakDownPane{Application: t.app}
+	breakDownPane.Init()
+	t.breakDownPane = &breakDownPane
+
+	packetDetailsPane := PacketDetailsPane{Application: t.app, PDUHandover: breakDownPane.AddPDU}
+	packetDetailsPane.Init()
+	t.packetDetailsPane = &packetDetailsPane
+
+	packetListPane := PacketListPane{Application: t.app, PDUHandover: packetDetailsPane.AddPDU}
+	packetListPane.Init(iface)
+	t.packetListPane = &packetListPane
+
 	rootFlexBox := tview.NewFlex()
-	rootFlexBox.AddItem(tr.table, 0, 6, false)
+	rootFlexBox.AddItem(packetListPane.Primitive(), 0, 6, true)
 
 	rightFlex := tview.NewFlex().SetDirection(tview.FlexRow)
-	rightFlex.AddItem(tr.pduDetailedViewBox, 0, 1, false)
-	rightFlex.AddItem(tr.PDUBreakDownBox, 0, 1, false)
+	rightFlex.AddItem(packetDetailsPane.Primitive(), 0, 1, false)
+	rightFlex.AddItem(breakDownPane.Primitive(), 0, 1, false)
 
 	rootFlexBox.AddItem(rightFlex, 0, 4, false)
-
-	go tr.app.QueueUpdateDraw(func() { tr.addRow(columns) })
-	tr.app.SetRoot(rootFlexBox, true)
+	t.app.SetRoot(rootFlexBox, true)
 }
 
-func (tr *TerminalRenderer) Run() {
-	log.Fatal(tr.app.Run())
+func (t *Terminal) Init() {
+	t.app = tview.NewApplication()
+	t.app.EnableMouse(true)
+}
+
+func (t *Terminal) Start(ifaces []string) {
+	if t.app == nil {
+		t.Init()
+	}
+	modal := tview.NewModal().
+		SetText("Select a network interface").AddButtons(ifaces).SetDoneFunc(
+		func(buttonIndex int, buttonLabel string) {
+			t.InitPanes(buttonLabel)
+			t.NetworkInterface <- buttonLabel
+		})
+	if err := t.app.SetRoot(modal, false).EnableMouse(true).Run(); err != nil {
+		panic(err)
+	}
+}
+
+func (t *Terminal) AddPDU(pdu *units.PDU) error {
+	t.packetListPane.AddPDU(pdu)
+	return nil
 }

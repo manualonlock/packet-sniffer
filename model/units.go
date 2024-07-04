@@ -15,25 +15,29 @@ const (
 	LINK_LAYER_DISCOVERY
 )
 
-var ProtocolStringMap = map[Protocol]string{
-	ETHERNET:             "ETHERNET",
-	ARP:                  "ARP",
-	IPv4:                 "IPv4",
-	IPv6:                 "IPv6",
-	TCP:                  "TCP",
-	ICMP:                 "ICMP",
-	UDP:                  "UDP",
-	VLAN_TAGGED:          "VLAN_TAGGED",
-	LINK_LAYER_DISCOVERY: "LINK_LAYER_DISCOVERY",
+type ProtocolName struct {
+	Shortened string
+	Full      string
 }
 
-type Header struct {
-	Value              []byte
-	HumanReadableValue string
+var ProtocolStringMap = map[Protocol]ProtocolName{
+	ETHERNET:             {"Ethernet", "Ethernet Protocol"},
+	ARP:                  {"ARP", "Address Resolution Protocol"},
+	IPv4:                 {"IPv4", "Internet Protocol version 4"},
+	IPv6:                 {"IPv6", "Internet Protocol version 6"},
+	TCP:                  {"TCP", "Transmission Control Protocol"},
+	ICMP:                 {"ICMP", "Internet Control Message Protocol"},
+	UDP:                  {"UDP", "User Datagram Protocol"},
+	VLAN_TAGGED:          {"VLAN", "Virtual Local Area Network"},
+	LINK_LAYER_DISCOVERY: {"LLDP", "Link Layer Discovery Protocol"},
 }
+
+type PDUHeaderKey uint8
+
+type Header []byte
 
 type PDU struct {
-	Headers map[string]Header
+	Headers map[PDUHeaderKey]Header
 	Protocol
 	NextPDU *PDU
 	PrevPDU *PDU

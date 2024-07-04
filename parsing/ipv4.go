@@ -11,6 +11,37 @@ import (
 type IPV4Parser struct {
 }
 
+const (
+	srcIP units.PDUHeaderKey = iota
+	dstIP
+	versionIP
+	headerLengthIP
+	DSCPIP
+	ECNIP
+	packetLengthIP
+	identificationIP
+	flagsIP
+	fragmentationOffsetIP
+	ttlIP
+	protocolIP
+	headerChecksumIP
+)
+
+var ipHeaderNames = map[units.PDUHeaderKey]string{
+	srcIP:                 "Src",
+	dstIP:                 "Dst",
+	versionIP:             "Version",
+	headerLengthIP:        "Header Length",
+	DSCPIP:                "Service Type",
+	packetLengthIP:        "Packet Length",
+	identificationIP:      "Identification",
+	flagsIP:               "Flags",
+	fragmentationOffsetIP: "Fragmentation Offset",
+	ttlIP:                 "TTL",
+	protocolIP:            "Protocol",
+	headerChecksumIP:      "Header Checksum",
+}
+
 var dscpMap = map[byte]string{
 	0:  "CS0",
 	8:  "CS1",
@@ -35,6 +66,13 @@ var dscpMap = map[byte]string{
 	38: "AF43",
 }
 
+var ecnMap = map[byte]string{
+	0: "Not-ECT",
+	1: "ECT(1)",
+	2: "ECT(2)",
+	3: "Congestion Experienced",
+}
+
 var IPv4ProtocolHeaderMap = map[byte]units.Protocol{
 	1:  units.ICMP,
 	6:  units.TCP,
@@ -56,81 +94,30 @@ func convertToIP(b []byte) string {
 	return ip.String()
 }
 
-func (p *IPV4Parser) Parse(buf []byte) (*units.PDU, error) {
-	h := make(map[string]units.Header, 13)
-
-	version := buf[0] >> 4
-
-	h["version"] = units.Header{Value: []byte{version}, HumanReadableValue: strconv.FormatUint(uint64(version), 10)} // IPv4 packets are always of the same version
-
+func (p IPV4Parser) Parse(buf []byte) (*units.PDU, error) {
+	h := make(map[units.PDUHeaderKey]units.Header, 13)
+	h[versionIP] = units.Header{buf[0] >> 4}
 	headerLength := buf[0] & 0b00001111
-	h["headerLength"] = units.Header{
-		Value:              []byte{headerLength},
-		HumanReadableValue: strconv.FormatUint(uint64(headerLength), 10),
-	}
+	h[headerLengthIP] = units.Header{headerLength}
+	h[DSCPIP] = units.Header{buf[1] >> 2}
+	h[ECNIP] = units.Header{buf[1] >> 6}
+	h[packetLengthIP] = buf[2:4]
 
-	DSCP := buf[1]
+	h[identificationIP] = buf[4:6]
 
-	h["serviceType"] = units.Header{
-		Value:              []byte{DSCP},
-		HumanReadableValue: dscpName(DSCP),
-	}
+	h[flagsIP] = []byte{buf[6] >> 5}
+	fgOffset := (uint16(buf[6])&0x1F)<<8 | uint16(buf[7])
+	fgOffsetBytes := []byte{byte(fgOffset >> 8), byte(fgOffset & 0xff)}
+	h[fragmentationOffsetIP] = fgOffsetBytes
 
-	packetLength := buf[2:4]
-	h["packetLength"] = units.Header{
-		Value:              packetLength,
-		HumanReadableValue: strconv.FormatUint(uint64(binary.BigEndian.Uint16(packetLength)), 10),
-	}
+	h[ttlIP] = buf[8:9]
+	h[protocolIP] = buf[9:10]
 
-	identication := buf[4:6]
-	h["identication"] = units.Header{
-		Value:              identication,
-		HumanReadableValue: strconv.FormatUint(uint64(binary.BigEndian.Uint16(identication)), 16),
-	}
+	h[headerChecksumIP] = buf[10:12]
 
-	flags := binary.BigEndian.Uint16(buf[6:8]) >> 13
-	h["flags"] = units.Header{
-		Value:              []byte{byte(flags)},
-		HumanReadableValue: strconv.FormatUint(uint64(flags), 2),
-	}
+	h[srcIP] = buf[12:16]
+	h[dstIP] = buf[16:20]
 
-	fragmentationOffset := binary.BigEndian.Uint16(buf[6:8]) & 0b0001111111111111
-	h["fragmentationOffset"] = units.Header{
-		Value:              []byte{byte(fragmentationOffset)},
-		HumanReadableValue: strconv.FormatUint(uint64(fragmentationOffset), 10),
-	}
-
-	TTL := buf[8:9]
-	h["TTL"] = units.Header{
-		Value:              TTL,
-		HumanReadableValue: strconv.FormatUint(uint64(TTL[0]), 10),
-	}
-
-	protocolHeader := buf[9:10]
-	protocol := IPv4ProtocolHeaderMap[protocolHeader[0]]
-
-	protocolHR := units.ProtocolStringMap[protocol]
-
-	h["protocol"] = units.Header{
-		Value:              protocolHeader,
-		HumanReadableValue: protocolHR,
-	}
-
-	headerChecksum := buf[10:12]
-	h["headerChecksum"] = units.Header{
-		Value:              headerChecksum,
-		HumanReadableValue: strconv.FormatUint(uint64(binary.BigEndian.Uint16(headerChecksum)), 10),
-	}
-
-	h["sourceIP"] = units.Header{
-		Value:              buf[12:16],
-		HumanReadableValue: convertToIP(buf[12:16]),
-	}
-
-	h["destIP"] = units.Header{
-		Value:              buf[16:20],
-		HumanReadableValue: convertToIP(buf[16:20]),
-	}
 	return &units.PDU{
 		Headers:  h,
 		Payload:  buf[headerLength*4:],
@@ -138,6 +125,195 @@ func (p *IPV4Parser) Parse(buf []byte) (*units.PDU, error) {
 	}, nil
 }
 
-func (p *IPV4Parser) GetNextProtocol(pdu *units.PDU) units.Protocol {
+func (p IPV4Parser) getFragmentationOffsetHumanReadable(header []byte) string {
+	fgOffest := binary.BigEndian.Uint16(header)
+	return fmt.Sprintf(
+		"%01b %04b %04b %04b",
+		fgOffest>>15,
+		fgOffest>>11&0x7,
+		fgOffest>>7&0x7,
+		fgOffest>>3&0x7,
+	)
+}
+
+func (p IPV4Parser) HeaderToHumanReadable(headerKey units.PDUHeaderKey, header units.Header) string {
+	switch headerKey {
+	case srcIP, dstIP:
+		return convertToIP(header)
+		// TODO fragmentationOffset
+	case versionIP, headerLengthIP, ttlIP, headerChecksumIP:
+		return strconv.FormatUint(uint64(header[0]), 10)
+	case fragmentationOffsetIP:
+		return p.getFragmentationOffsetHumanReadable(header)
+	case DSCPIP:
+		return dscpName(header[0])
+	case packetLengthIP, identificationIP:
+		return strconv.FormatUint(uint64(binary.BigEndian.Uint16(header)), 10)
+	case flagsIP:
+		return strconv.FormatUint(uint64(header[0]), 2)
+	case protocolIP:
+		protocol := IPv4ProtocolHeaderMap[header[0]]
+		protocolName, hit := units.ProtocolStringMap[protocol]
+
+		if hit == true {
+			return protocolName.Shortened
+		}
+	}
+	return "Unknown"
+}
+
+func (p IPV4Parser) GetNextProtocol(pdu *units.PDU) units.Protocol {
 	return units.UNKNOWN
+}
+
+func (p IPV4Parser) MostSignificantHeaders() []units.PDUHeaderKey {
+	return []units.PDUHeaderKey{srcIP, dstIP}
+}
+
+func (p IPV4Parser) HeaderName(header units.PDUHeaderKey) string {
+	return ipHeaderNames[header]
+}
+
+func (p IPV4Parser) firstByteBreakdown(pdu *units.PDU, header units.PDUHeaderKey) PDUBreakdownOutput {
+	h := pdu.Headers[header]
+	val := p.HeaderToHumanReadable(header, h)
+	desc := fmt.Sprintf("%04b", h[0])
+	return PDUBreakdownOutput{
+		KeyName:     ipHeaderNames[header],
+		Value:       fmt.Sprintf("%s", val),
+		Header:      &h,
+		Description: &desc,
+	}
+}
+
+func (p IPV4Parser) differentiatedServicesBreakdown(pdu *units.PDU) PDUBreakdownOutput {
+	h := pdu.Headers[DSCPIP]
+	hECN := pdu.Headers[ECNIP]
+	desc := fmt.Sprintf("DSCP: %s, ECN: %s", dscpMap[h[0]], ecnMap[hECN[0]])
+	return PDUBreakdownOutput{
+		KeyName:     ipHeaderNames[DSCPIP],
+		Value:       fmt.Sprintf("0x%02x", h[0]),
+		Header:      &h,
+		Description: &desc,
+	}
+}
+
+func (p IPV4Parser) packetLengthBreakdown(pdu *units.PDU) PDUBreakdownOutput {
+	h := pdu.Headers[packetLengthIP]
+	return PDUBreakdownOutput{
+		KeyName: ipHeaderNames[packetLengthIP],
+		Value:   fmt.Sprintf("%d", binary.BigEndian.Uint16(h)),
+		Header:  &h,
+	}
+}
+
+func (p IPV4Parser) IdentificationBreakdown(pdu *units.PDU) PDUBreakdownOutput {
+	h := pdu.Headers[identificationIP]
+	hUint := binary.BigEndian.Uint16(h)
+	return PDUBreakdownOutput{
+		KeyName: ipHeaderNames[identificationIP],
+		Value:   fmt.Sprintf("0x%04x (%d)", hUint, hUint),
+		Header:  &h,
+	}
+}
+
+var isFlagSet = map[byte]string{
+	0: "Not Set",
+	1: "Set",
+}
+
+func (p IPV4Parser) FlagsBreakdown(pdu *units.PDU) PDUBreakdownOutput {
+	h := pdu.Headers[flagsIP]
+	val := h[0]
+	reservedBitFlag := val >> 2
+	dontFragmentFlag := (val >> 1) & 0b001
+	MoreFragments := val & 0b001
+
+	return PDUBreakdownOutput{
+		KeyName:     ipHeaderNames[flagsIP],
+		Value:       fmt.Sprintf("%03b", val),
+		Header:      &h,
+		Description: nil,
+		InnerBreakdowns: []PDUBreakdownOutput{
+			{
+				KeyName: "Reserved bit",
+				Value:   isFlagSet[reservedBitFlag],
+			},
+			{
+				KeyName: "Don't fragment bit",
+				Value:   isFlagSet[dontFragmentFlag],
+			},
+			{
+				KeyName: "More Fragments",
+				Value:   isFlagSet[MoreFragments],
+			},
+		},
+	}
+}
+
+func (p IPV4Parser) FragmentationOffsetBreakdown(pdu *units.PDU) PDUBreakdownOutput {
+	h := pdu.Headers[fragmentationOffsetIP]
+	return PDUBreakdownOutput{
+		KeyName: ipHeaderNames[fragmentationOffsetIP],
+		Value:   p.getFragmentationOffsetHumanReadable(h),
+		Header:  &h,
+	}
+}
+
+func (p IPV4Parser) ttlBreakdown(pdu *units.PDU) PDUBreakdownOutput {
+	h := pdu.Headers[ttlIP]
+	val := p.HeaderToHumanReadable(ttlIP, h)
+	return PDUBreakdownOutput{
+		KeyName: ipHeaderNames[ttlIP],
+		Value:   fmt.Sprintf("%s", val),
+		Header:  &h,
+	}
+}
+
+func (p IPV4Parser) protocolBreakdown(pdu *units.PDU) PDUBreakdownOutput {
+	h := pdu.Headers[protocolIP]
+	protocolName := p.HeaderToHumanReadable(protocolIP, h)
+	desc := fmt.Sprintf("%d", h[0])
+	return PDUBreakdownOutput{
+		KeyName:     ipHeaderNames[protocolIP],
+		Value:       fmt.Sprintf("%s", protocolName),
+		Header:      &h,
+		Description: &desc,
+	}
+}
+
+func (p IPV4Parser) headerChecksumBreakdown(pdu *units.PDU) PDUBreakdownOutput {
+	h := pdu.Headers[headerChecksumIP]
+
+	return PDUBreakdownOutput{
+		KeyName: ipHeaderNames[headerChecksumIP],
+		Value:   fmt.Sprintf("0x%0x", binary.BigEndian.Uint16(h)),
+		Header:  &h,
+	}
+}
+
+func (p IPV4Parser) ipAddressBreakdown(pdu *units.PDU, addressKey units.PDUHeaderKey) PDUBreakdownOutput {
+	h := pdu.Headers[addressKey]
+	return PDUBreakdownOutput{
+		KeyName: ipHeaderNames[addressKey],
+		Value:   p.HeaderToHumanReadable(addressKey, h),
+		Header:  &h,
+	}
+}
+
+func (p IPV4Parser) PDUBreakdown(pdu *units.PDU) []PDUBreakdownOutput {
+	bdo := make([]PDUBreakdownOutput, 12)
+	bdo[0] = p.firstByteBreakdown(pdu, versionIP)
+	bdo[1] = p.firstByteBreakdown(pdu, headerLengthIP)
+	bdo[2] = p.differentiatedServicesBreakdown(pdu)
+	bdo[3] = p.packetLengthBreakdown(pdu)
+	bdo[4] = p.IdentificationBreakdown(pdu)
+	bdo[5] = p.FlagsBreakdown(pdu)
+	bdo[6] = p.FragmentationOffsetBreakdown(pdu)
+	bdo[7] = p.ttlBreakdown(pdu)
+	bdo[8] = p.protocolBreakdown(pdu)
+	bdo[9] = p.headerChecksumBreakdown(pdu)
+	bdo[10] = p.ipAddressBreakdown(pdu, srcIP)
+	bdo[11] = p.ipAddressBreakdown(pdu, dstIP)
+	return bdo
 }
