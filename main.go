@@ -109,12 +109,12 @@ func stdout(protocols []units.Protocol) {
 
 func main() {
 	mode := flag.String("mode", "stdout", "Select the packet sniffer's mode")
-	protocols := flag.String("protocols", "", "Space separated list of protocol names")
+	protocols := flag.String("protocols", "", "Comma separated list of protocol names")
 	flag.Parse()
 
 	protocolsToFilter := make([]units.Protocol, 0)
 	if protocols != nil {
-		for _, protocol := range strings.Split(*protocols, " ") {
+		for _, protocol := range strings.Split(*protocols, ",") {
 			for internalProtocolCode, protocolName := range units.ProtocolStringMap {
 				if strings.ToLower(protocolName.Shortened) == strings.ToLower(protocol) {
 					protocolsToFilter = append(protocolsToFilter, internalProtocolCode)
