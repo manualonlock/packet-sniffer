@@ -19,5 +19,5 @@ type Parser interface {
 	MostSignificantHeaders() []units.PDUHeaderKey
 	HeaderName(header units.PDUHeaderKey) string
 	PDUBreakdown(pdu *units.PDU) []PDUBreakdownOutput
-	HeaderToHumanReadable(headerKey units.PDUHeaderKey, header units.Header) string
+	HeaderToHumanReadable(headerKey units.PDUHeaderKey, pdu *units.PDU) string
 }

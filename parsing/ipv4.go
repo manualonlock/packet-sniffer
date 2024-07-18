@@ -136,7 +136,8 @@ func (p IPV4Parser) getFragmentationOffsetHumanReadable(header []byte) string {
 	)
 }
 
-func (p IPV4Parser) HeaderToHumanReadable(headerKey units.PDUHeaderKey, header units.Header) string {
+func (p IPV4Parser) HeaderToHumanReadable(headerKey units.PDUHeaderKey, pdu *units.PDU) string {
+	header := pdu.Headers[headerKey]
 	switch headerKey {
 	case srcIP, dstIP:
 		return convertToIP(header)
@@ -176,7 +177,7 @@ func (p IPV4Parser) HeaderName(header units.PDUHeaderKey) string {
 
 func (p IPV4Parser) firstByteBreakdown(pdu *units.PDU, header units.PDUHeaderKey) PDUBreakdownOutput {
 	h := pdu.Headers[header]
-	val := p.HeaderToHumanReadable(header, h)
+	val := p.HeaderToHumanReadable(header, pdu)
 	desc := fmt.Sprintf("%04b", h[0])
 	return PDUBreakdownOutput{
 		KeyName:     ipHeaderNames[header],
@@ -262,7 +263,7 @@ func (p IPV4Parser) FragmentationOffsetBreakdown(pdu *units.PDU) PDUBreakdownOut
 
 func (p IPV4Parser) ttlBreakdown(pdu *units.PDU) PDUBreakdownOutput {
 	h := pdu.Headers[ttlIP]
-	val := p.HeaderToHumanReadable(ttlIP, h)
+	val := p.HeaderToHumanReadable(ttlIP, pdu)
 	return PDUBreakdownOutput{
 		KeyName: ipHeaderNames[ttlIP],
 		Value:   fmt.Sprintf("%s", val),
@@ -272,7 +273,7 @@ func (p IPV4Parser) ttlBreakdown(pdu *units.PDU) PDUBreakdownOutput {
 
 func (p IPV4Parser) protocolBreakdown(pdu *units.PDU) PDUBreakdownOutput {
 	h := pdu.Headers[protocolIP]
-	protocolName := p.HeaderToHumanReadable(protocolIP, h)
+	protocolName := p.HeaderToHumanReadable(protocolIP, pdu)
 	desc := fmt.Sprintf("%d", h[0])
 	return PDUBreakdownOutput{
 		KeyName:     ipHeaderNames[protocolIP],
@@ -296,7 +297,7 @@ func (p IPV4Parser) ipAddressBreakdown(pdu *units.PDU, addressKey units.PDUHeade
 	h := pdu.Headers[addressKey]
 	return PDUBreakdownOutput{
 		KeyName: ipHeaderNames[addressKey],
-		Value:   p.HeaderToHumanReadable(addressKey, h),
+		Value:   p.HeaderToHumanReadable(addressKey, pdu),
 		Header:  &h,
 	}
 }

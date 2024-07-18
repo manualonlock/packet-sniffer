@@ -23,6 +23,7 @@ var etherHeaderNames = map[units.PDUHeaderKey]string{
 
 var etherTypeMap = map[int]units.Protocol{
 	0x0800: units.IPv4,
+	0x0806: units.ARP,
 }
 
 func (p EthernetParser) Parse(buf []byte) (*units.PDU, error) {
@@ -38,13 +39,14 @@ func (p EthernetParser) Parse(buf []byte) (*units.PDU, error) {
 	}, nil
 }
 
-func (p EthernetParser) HeaderToHumanReadable(headerKey units.PDUHeaderKey, header units.Header) string {
+func (p EthernetParser) HeaderToHumanReadable(headerKey units.PDUHeaderKey, pdu *units.PDU) string {
+	header := pdu.Headers[headerKey]
 	switch headerKey {
 	case dstMac, srcMac:
-		return p.formatMac(header)
+		return formatMac(header)
 	case etherType:
 		var protocolShortenedName string
-		protocolName, hit := units.ProtocolStringMap[p.ProtocolFromEtherType(binary.BigEndian.Uint16(header))]
+		protocolName, hit := units.ProtocolStringMap[p.ProtocolFromEtherType(header)]
 		if hit == true {
 			protocolShortenedName = protocolName.Shortened
 		}
@@ -53,8 +55,8 @@ func (p EthernetParser) HeaderToHumanReadable(headerKey units.PDUHeaderKey, head
 	return ""
 }
 
-func (p EthernetParser) ProtocolFromEtherType(ethType uint16) units.Protocol {
-	v, hit := etherTypeMap[int(ethType)]
+func (p EthernetParser) ProtocolFromEtherType(ethTypeHeader []byte) units.Protocol {
+	v, hit := etherTypeMap[int(binary.BigEndian.Uint16(ethTypeHeader))]
 	if hit == true {
 		return v
 	} else {
@@ -64,12 +66,7 @@ func (p EthernetParser) ProtocolFromEtherType(ethType uint16) units.Protocol {
 
 func (p EthernetParser) GetNextProtocol(pdu *units.PDU) units.Protocol {
 	var ethType = pdu.Headers[etherType]
-	return p.ProtocolFromEtherType(binary.BigEndian.Uint16(ethType))
-}
-
-func (p EthernetParser) formatMac(mac []byte) string {
-	return fmt.Sprintf("%02x:%02x:%02x:%02x:%02x:%02x",
-		mac[0], mac[1], mac[2], mac[3], mac[4], mac[5])
+	return p.ProtocolFromEtherType(ethType)
 }
 
 func (p EthernetParser) formatEtherType(mac []byte) string {
@@ -87,8 +84,13 @@ func (p EthernetParser) HeaderName(header units.PDUHeaderKey) string {
 
 func (p EthernetParser) PDUBreakdown(pdu *units.PDU) []PDUBreakdownOutput {
 	output := make([]PDUBreakdownOutput, 3)
-	output[0] = PDUBreakdownOutput{KeyName: "Destination", Value: p.HeaderToHumanReadable(dstMac, pdu.Headers[dstMac])}
-	output[1] = PDUBreakdownOutput{KeyName: "Source", Value: p.HeaderToHumanReadable(srcMac, pdu.Headers[srcMac])}
-	output[2] = PDUBreakdownOutput{KeyName: "Type", Value: p.HeaderToHumanReadable(etherType, pdu.Headers[etherType])}
+	output[0] = PDUBreakdownOutput{KeyName: "Destination", Value: p.HeaderToHumanReadable(dstMac, pdu)}
+	output[1] = PDUBreakdownOutput{KeyName: "Source", Value: p.HeaderToHumanReadable(srcMac, pdu)}
+	output[2] = PDUBreakdownOutput{KeyName: "Type", Value: p.HeaderToHumanReadable(etherType, pdu)}
 	return output
+}
+
+func formatMac(mac []byte) string {
+	return fmt.Sprintf("%02x:%02x:%02x:%02x:%02x:%02x",
+		mac[0], mac[1], mac[2], mac[3], mac[4], mac[5])
 }

@@ -1,16 +1,34 @@
 package main
 
 import (
+	"bufio"
 	"flag"
+	"fmt"
 	"log"
+	"os"
 	"packet_sniffer/capture"
+	units "packet_sniffer/model"
 	"packet_sniffer/parsing"
 	"packet_sniffer/render"
 	"packet_sniffer/utils"
-	"time"
+	"strconv"
+	"strings"
 )
 
-func terminal() {
+func isMakingThroughFilter(pdu *units.PDU, protocols []units.Protocol) bool {
+	currentPDU := pdu
+	for currentPDU != nil {
+		for _, protocol := range protocols {
+			if protocol == currentPDU.Protocol {
+				return true
+			}
+		}
+		currentPDU = currentPDU.NextPDU
+	}
+	return false
+}
+
+func terminal(protocols []units.Protocol) {
 	parser := parsing.CompositeParser{}
 	capturer := capture.UnixCapturer{}
 
@@ -32,8 +50,15 @@ func terminal() {
 				return
 			}
 			pdu, err := parser.Parse(raw)
+			//if len(protocols) > 0 && isMakingThroughFilter(pdu, protocols) {
+			//	err = renderer.AddPDU(pdu)
+			//	//time.Sleep(time.Second * 2)
+			//	if err != nil {
+			//		log.Fatal(err)
+			//		return
+			//	}
+			//}
 			err = renderer.AddPDU(pdu)
-			time.Sleep(time.Second * 2)
 			if err != nil {
 				log.Fatal(err)
 				return
@@ -42,54 +67,64 @@ func terminal() {
 
 	}()
 	renderer.Start(ifaces)
-
 }
 
-func stdout() {
-	//parser := parsing.CompositeParser{}
-	//capturer := capture.UnixCapturer{}
-	//if err := capturer.Init("wlp0s20f3"); err != nil {
-	//	log.Fatal(err)
-	//}
-	//for {
-	//	var input string
-	//	fmt.Println("Press enter so capture next PDU...")
-	//	fmt.Scanln(&input)
-	//	raw, err := capturer.Capture()
-	//	if err != nil {
-	//		log.Fatal(err)
-	//		return
-	//	}
-	//	pdu, _ := parser.Parse(raw)
-	//	if pdu.NextPDU != nil && pdu.NextPDU.Protocol == units.IPv4 {
-	//		parsing.IPV4Parser{}.PDUBreakdown(pdu.NextPDU)
-	//
-	//	}
-	//	fmt.Println(pdu)
-	//currentPDU, err := parser.Parse(raw)
+func stdout(protocols []units.Protocol) {
+	reader := bufio.NewReader(os.Stdout)
 
-	//for currentPDU != nil {
-	//	protocolHMR := units.ProtocolStringMap[currentPDU.Protocol]
-	//	fmt.Printf("PDU: %s\n", protocolHMR)
-	//	for h, v := range currentPDU.Headers {
-	//		fmt.Printf("%s: %s\n", h, v.HumanReadableValue)
-	//	}
-	//	currentPDU = currentPDU.NextPDU
-	//	fmt.Println()
-	//}
-	//	if err != nil {
-	//		log.Fatal(err)
-	//		return
-	//	}
-	//}
+	parser := parsing.CompositeParser{}
+	capturer := capture.UnixCapturer{}
+	fmt.Println("Select a network interface:")
+	ifaces := utils.GetNetworkInterfaces()
+	for i, iface := range ifaces {
+		fmt.Printf("%d: %s\n", i+1, iface)
+	}
+	fmt.Println()
+	choice, err := reader.ReadString('\n')
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	choice = strings.TrimSpace(choice)
+	option, err := strconv.Atoi(choice)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	if option > len(ifaces) && option < 1 {
+		return
+	}
+	capturer.Init(ifaces[option-1])
+
+	for {
+		buf, _ := capturer.Capture()
+		pdu, _ := parser.Parse(buf)
+		if len(protocols) > 0 && isMakingThroughFilter(pdu, protocols) {
+			utils.PDUPrettyPrint(pdu)
+			fmt.Println("Press enter to get the next PDU...")
+			reader.ReadString('\n')
+		}
+	}
 }
 
 func main() {
 	mode := flag.String("mode", "stdout", "Select the packet sniffer's mode")
+	protocols := flag.String("protocols", "", "Space separated list of protocol names")
 	flag.Parse()
+
+	protocolsToFilter := make([]units.Protocol, 0)
+	if protocols != nil {
+		for _, protocol := range strings.Split(*protocols, " ") {
+			for internalProtocolCode, protocolName := range units.ProtocolStringMap {
+				if strings.ToLower(protocolName.Shortened) == strings.ToLower(protocol) {
+					protocolsToFilter = append(protocolsToFilter, internalProtocolCode)
+				}
+			}
+		}
+	}
 	if *mode == "stdout" {
-		stdout()
+		stdout(protocolsToFilter)
 	} else if *mode == "terminal" {
-		terminal()
+		terminal(protocolsToFilter)
 	}
 }

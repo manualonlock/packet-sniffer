@@ -57,19 +57,23 @@ func (p *PacketListPane) AddPDU(pdu *units.PDU) {
 		}
 		parser := parsing.ParserFromProtocol(currentPDU.Protocol)
 
-		srcHeader, hit := currentPDU.Headers[parsing.SRCHeader]
+		_, hit := currentPDU.Headers[parsing.SRCHeader]
 		if hit == true {
-			source = parser.HeaderToHumanReadable(parsing.SRCHeader, srcHeader)
+			source = parser.HeaderToHumanReadable(parsing.SRCHeader, currentPDU)
 		}
-		dstHeader, hit := currentPDU.Headers[parsing.DSTHeader]
+		_, hit = currentPDU.Headers[parsing.DSTHeader]
 		if hit == true {
-			dest = parser.HeaderToHumanReadable(parsing.DSTHeader, dstHeader)
+			dest = parser.HeaderToHumanReadable(parsing.DSTHeader, currentPDU)
 		}
 		currentPDU = currentPDU.NextPDU
 	}
-	go p.Application.QueueUpdateDraw(func() { p.AddRow(source, dest, protocol, length) })
-	rowToPDU := *p.rowToPDU
-	rowToPDU[p.table.GetRowCount()] = pdu
+	go func() {
+		p.Application.QueueUpdateDraw(func() {
+			rowToPDU := *p.rowToPDU
+			rowToPDU[p.table.GetRowCount()] = pdu
+			p.AddRow(source, dest, protocol, length)
+		})
+	}()
 }
 
 func (p *PacketListPane) AddRow(initialValues ...string) error {
@@ -147,7 +151,7 @@ func (p *PacketDetailsPane) AddPDU(pdu *units.PDU) {
 		values[0] = units.ProtocolStringMap[currentPDU.Protocol].Full
 
 		for i := 0; i < len(msh); i++ {
-			hhr := parser.HeaderToHumanReadable(msh[i], currentPDU.Headers[msh[i]])
+			hhr := parser.HeaderToHumanReadable(msh[i], currentPDU)
 			values[i+1] = fmt.Sprintf("%s: %s", parser.HeaderName(msh[i]), hhr)
 		}
 		p.AddRow(strings.Join(values, ", "))
