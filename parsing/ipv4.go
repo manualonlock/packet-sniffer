@@ -164,10 +164,14 @@ func (p IPV4Parser) HeaderToHumanReadable(headerKey units.PDUHeaderKey, pdu *uni
 }
 
 func (p IPV4Parser) GetNextProtocol(pdu *units.PDU) units.Protocol {
+	protocol, _ := IPv4ProtocolHeaderMap[pdu.Headers[protocolIP][0]]
+	if protocol == units.ICMP {
+		return units.ICMP
+	}
 	return units.UNKNOWN
 }
 
-func (p IPV4Parser) MostSignificantHeaders() []units.PDUHeaderKey {
+func (p IPV4Parser) MostSignificantHeaders(*units.PDU) []units.PDUHeaderKey {
 	return []units.PDUHeaderKey{srcIP, dstIP}
 }
 

@@ -146,7 +146,7 @@ func (p *PacketDetailsPane) AddPDU(pdu *units.PDU) {
 
 		parser := parsing.ParserFromProtocol(currentPDU.Protocol)
 
-		msh := parser.MostSignificantHeaders()
+		msh := parser.MostSignificantHeaders(currentPDU)
 		values := make([]string, len(msh)+1)
 		values[0] = units.ProtocolStringMap[currentPDU.Protocol].Full
 

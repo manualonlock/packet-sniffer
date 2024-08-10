@@ -50,14 +50,6 @@ func terminal(protocols []units.Protocol) {
 				return
 			}
 			pdu, err := parser.Parse(raw)
-			//if len(protocols) > 0 && isMakingThroughFilter(pdu, protocols) {
-			//	err = renderer.AddPDU(pdu)
-			//	//time.Sleep(time.Second * 2)
-			//	if err != nil {
-			//		log.Fatal(err)
-			//		return
-			//	}
-			//}
 			err = renderer.AddPDU(pdu)
 			if err != nil {
 				log.Fatal(err)

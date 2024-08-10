@@ -154,7 +154,7 @@ func (p ArpParser) HeaderToHumanReadable(headerKey units.PDUHeaderKey, pdu *unit
 	}
 }
 
-func (p ArpParser) MostSignificantHeaders() []units.PDUHeaderKey {
+func (p ArpParser) MostSignificantHeaders(*units.PDU) []units.PDUHeaderKey {
 	return []units.PDUHeaderKey{protocolTypeArp, senderHardwareAddressArp, targetProtocolAddressArp, senderProtocolAddressArp, targetProtocolAddressArp}
 }
 

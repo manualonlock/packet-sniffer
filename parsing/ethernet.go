@@ -46,6 +46,10 @@ func (p EthernetParser) HeaderToHumanReadable(headerKey units.PDUHeaderKey, pdu 
 		return formatMac(header)
 	case etherType:
 		var protocolShortenedName string
+		protocol := p.ProtocolFromEtherType(header)
+		if protocol == units.UNKNOWN {
+			return fmt.Sprintf("Unknown Ethernet Protocol %04x", binary.BigEndian.Uint16(header))
+		}
 		protocolName, hit := units.ProtocolStringMap[p.ProtocolFromEtherType(header)]
 		if hit == true {
 			protocolShortenedName = protocolName.Shortened
@@ -74,7 +78,7 @@ func (p EthernetParser) formatEtherType(mac []byte) string {
 		mac[0], mac[1], mac[2], mac[3], mac[4], mac[5])
 }
 
-func (p EthernetParser) MostSignificantHeaders() []units.PDUHeaderKey {
+func (p EthernetParser) MostSignificantHeaders(*units.PDU) []units.PDUHeaderKey {
 	return []units.PDUHeaderKey{dstMac, srcMac, etherType}
 }
 

@@ -12,6 +12,9 @@ func ParserFromProtocol(protocol units.Protocol) Parser {
 		return IPV4Parser{}
 	case units.ARP:
 		return ArpParser{}
+	case units.ICMP:
+		return ICMPParser{}
+
 	default:
 		return nil
 	}

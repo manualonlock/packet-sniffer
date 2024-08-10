@@ -16,7 +16,7 @@ type PDUBreakdownOutput struct {
 type Parser interface {
 	Parse(buf []byte) (*units.PDU, error)
 	GetNextProtocol(pdu *units.PDU) units.Protocol
-	MostSignificantHeaders() []units.PDUHeaderKey
+	MostSignificantHeaders(pdu *units.PDU) []units.PDUHeaderKey
 	HeaderName(header units.PDUHeaderKey) string
 	PDUBreakdown(pdu *units.PDU) []PDUBreakdownOutput
 	HeaderToHumanReadable(headerKey units.PDUHeaderKey, pdu *units.PDU) string
